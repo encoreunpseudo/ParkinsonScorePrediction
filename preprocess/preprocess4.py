@@ -1,29 +1,43 @@
 import pandas as pd
 import numpy as np
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, r2_score
 '''
 fichier pour centraliser toutes les transformations de données
 
 '''
 class PreprocessData:
     def __init__(self,path_X,path_y):
-        self.X = pd.read_csv(path_X)
+        self.X=pd.read_csv(path_X)
+
         self.y = pd.read_csv(path_y)
-        print("coucou")
-        self.virer_patient()
-        print("coucou 2")
+  
+
+        self.enlever_index()
         self.remplir_gene()
-        print("Coucou 3")
+        #self.virer_patient()
+        self.encoder_cohort()
+        self.imputer_age_at_diagnosis()
         
         
     
-    def valeurs_off(self):
-        pass
-
-    def remplir_gene(self):
-        pass
-
-    def virer_patient(self):
+    def enlever_index(self):
+        self.X.drop('Index',axis=1,inplace=True)
+        
+    def encoder_cohort(self):
+        self.X['cohort']=self.X['cohort'].apply(lambda x:1 if x=='A' else 0)
+        
+    def encoder_patient(self):
+        X_patient=self.X['patient_id']
+        vectorizer = CountVectorizer()
+        X_patient=vectorizer.fit_transform(X_patient)
+        X_patient=pd.DataFrame(X_patient.toarray(),columns=vectorizer.get_feature_names_out())
+        self.X=pd.concat([self.X,X_patient],axis=1)
         self.X.drop('patient_id',axis=1,inplace=True)
+        return self.X
+            
         
     def remplir_gene(self):
         X_list=self.X['gene'].tolist()
@@ -55,15 +69,78 @@ class PreprocessData:
   
                 X_list[i]='Inconnu'
         self.X['gene']=X_list
-        valeurs=['LRRK2+','No Mutation','GBA+','OTHER+','Inconnu']
         self.X['est_LRRK2+']=self.X['gene'].apply(lambda x: f_l(x))
         self.X['est_GBA+']=self.X['gene'].apply(lambda x: f_g(x))
         self.X['est_OTHER+']=self.X['gene'].apply(lambda x: f_o(x))
         self.X.drop('gene',axis=1,inplace=True)
         return self.X
+    def virer_patient(self):
+        self.X.drop('patient_id',axis=1,inplace=True)
     def get_X(self):
         return self.X
+    def get_y(self):
+        return self.y
+    def get_data(self):
+        return self.X,self.y
+    def rajout_feature_temps(self):
+        '''
+        Pour capturer la relation temporelle
+        '''
+        pass
+    def imputer_age_at_diagnosis(self):
+        """
+        Impute les valeurs manquantes de age_at_diagnosis en utilisant une régression linéaire.
+        """
 
         
-preprocess4 = PreprocessData('data/X_train_6ZIKlTY.csv', 'data/y_train_lXj6X5y.csv')
-print(preprocess4.get_X().head(30))
+        patients_values = self.X.dropna(subset=['age_at_diagnosis']).groupby('patient_id')['age_at_diagnosis'].first().reset_index()
+        patients_values.columns = ['patient_id', 'known_value']
+        
+        temp_df = self.X.merge(patients_values, on='patient_id', how='left')
+        
+        mask = temp_df['age_at_diagnosis'].isna() & temp_df['known_value'].notna()
+        self.X.loc[mask.values, 'age_at_diagnosis'] = temp_df.loc[mask, 'known_value'].values
+        
+        patients_sans_diagnostic = self.X.groupby('patient_id')['age_at_diagnosis'].apply(
+            lambda x: x.isna().all())
+        patients_sans_diagnostic = patients_sans_diagnostic[patients_sans_diagnostic].index.tolist()
+        
+        nb_patients_sans_diagnostic = len(patients_sans_diagnostic)
+        total_patients = len(self.X['patient_id'].unique())
+        pourcentage = (nb_patients_sans_diagnostic / total_patients) * 100
+
+        
+        if nb_patients_sans_diagnostic > 0:
+            patients_avec_diagnostic = ~self.X['patient_id'].isin(patients_sans_diagnostic)
+            df_known = self.X[patients_avec_diagnostic].dropna(subset=['age_at_diagnosis'])
+            df_known_unique = df_known.drop_duplicates('patient_id')
+            
+            features = ['age', 'sexM', 'est_LRRK2+', 'est_GBA+', 'est_OTHER+', 'cohort']
+            X_known = df_known_unique[features]
+            y_known = df_known_unique['age_at_diagnosis']
+            
+            X_train, X_test, y_train, y_test = train_test_split(
+                X_known, y_known, test_size=0.2, random_state=42)
+            
+            model = LinearRegression()
+            model.fit(X_train, y_train)
+            
+            y_pred = model.predict(X_test)
+            mae = mean_absolute_error(y_test, y_pred)
+            r2 = r2_score(y_test, y_pred)
+            print(f"Performance du modèle d'imputation linéaire - MAE: {mae:.2f}, R²: {r2:.2f}")
+            
+            df_unknown = self.X[self.X['patient_id'].isin(patients_sans_diagnostic)].drop_duplicates('patient_id')
+            X_unknown = df_unknown[features]
+            predicted_ages = model.predict(X_unknown)
+            
+            for i, patient_id in enumerate(df_unknown['patient_id']):
+                self.X.loc[self.X['patient_id'] == patient_id, 'age_at_diagnosis'] = predicted_ages[i]
+        
+        missing_pct = self.X['age_at_diagnosis'].isna().mean() * 100
+        print(f"Pourcentage de valeurs manquantes après imputation: {missing_pct:.2f}%")
+        self.X['disease_duration'] = self.X['age'] - self.X['age_at_diagnosis']
+        print("Variable 'disease_duration' ajoutée avec succès.")
+        
+        return self.X
+        
