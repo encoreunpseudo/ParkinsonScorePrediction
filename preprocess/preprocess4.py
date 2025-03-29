@@ -15,15 +15,21 @@ class PreprocessData:
         self.y = path_y
   
 
+        
+        
+        
+    def process_transformation(self):
         self.enlever_index()
         self.remplir_gene()
-        #self.virer_patient()
+       
         self.encoder_cohort()
         self.imputer_age_at_diagnosis()
         #self.rajout_feature_temps()
         self.encoder_patient()
-        
-        
+        self.imputer_valeurs_on()
+        self.rajout_feature_temps()
+        self.virer_patient_et_autre()
+        return self.X,self.y
     
     def enlever_index(self):
         self.X.drop('Index',axis=1,inplace=True)
@@ -37,7 +43,6 @@ class PreprocessData:
         X_patient=vectorizer.fit_transform(X_patient)
         X_patient=pd.DataFrame(X_patient.toarray(),columns=vectorizer.get_feature_names_out())
         self.X=pd.concat([self.X,X_patient],axis=1)
-        self.X.drop('patient_id',axis=1,inplace=True)
         return self.X
             
         
@@ -76,8 +81,10 @@ class PreprocessData:
         self.X['est_OTHER+']=self.X['gene'].apply(lambda x: f_o(x))
         self.X.drop('gene',axis=1,inplace=True)
         return self.X
-    def virer_patient(self):
+    def virer_patient_et_autre(self):
         self.X.drop('patient_id',axis=1,inplace=True)
+        self.X.drop(['time_since_intake_on','time_since_intake_off'],axis=1,inplace=True)
+        return self.X
     def get_X(self):
         return self.X
     def get_y(self):
@@ -97,19 +104,19 @@ class PreprocessData:
 
         # rajouter la progression du score on et off depuis la dernière visite
         self.X['diff_on'] = self.X.groupby('patient_id')['on'].diff()
-        self.X['diff_off'] = self.X.groupby('patient_id')['off'].diff()
+        #self.X['diff_off'] = self.X.groupby('patient_id')['off'].diff()
 
         # rajouter la progression du score on et off depuis la première visite
         self.X['diff_on_first'] = self.X.groupby('patient_id')['on'].transform('first')
-        self.X['diff_off_first'] = self.X.groupby('patient_id')['off'].transform('first')
+        #self.X['diff_off_first'] = self.X.groupby('patient_id')['off'].transform('first')
 
         # rajouter la moyenne du score on et off sur toutes les visites
         self.X['mean_on'] = self.X.groupby('patient_id')['on'].transform('mean')
-        self.X['mean_off'] = self.X.groupby('patient_id')['off'].transform('mean')
+        #self.X['mean_off'] = self.X.groupby('patient_id')['off'].transform('mean')
 
         # rajouter l'écart type du score on et off sur toutes les visites
         self.X['std_on'] = self.X.groupby('patient_id')['on'].transform('std')
-        self.X['std_off'] = self.X.groupby('patient_id')['off'].transform('std')
+        #self.X['std_off'] = self.X.groupby('patient_id')['off'].transform('std')
 
         # rajouter le temps depuis la dernière visite
         self.X['time_since_last_visit'] = self.X.groupby('patient_id')['age'].diff()
@@ -170,4 +177,35 @@ class PreprocessData:
         print("Variable 'disease_duration' ajoutée avec succès.")
         
         return self.X
-        
+    def imputer_valeurs_on(self):
+        """
+        Impute les valeurs manquantes de on en utilisant une régression linéaire.
+        """
+        X_copy = self.X.copy()
+        X_copy = X_copy.drop(['ledd','off','time_since_intake_on','time_since_intake_off','patient_id'],axis=1)
+
+        X_copy_a_imputer = X_copy[X_copy['on'].isna()]
+        X_copy_connu = X_copy[~X_copy['on'].isna()]
+
+        y_copy = X_copy_connu['on']
+
+        X_train, X_test, y_train, y_test = train_test_split(X_copy_connu.drop('on',axis=1), y_copy, test_size=0.2, random_state=42)
+
+        model = LinearRegression()
+        model.fit(X_train, y_train)
+
+        y_pred = model.predict(X_test)
+        mae = mean_absolute_error(y_test, y_pred)
+        print(f"Performance du modèle d'imputation linéaire - MAE: {mae:.2f}")
+        print("Imputation des valeurs manquantes de 'on'...")
+        X_copy.loc[X_copy['on'].isna(),'on'] = model.predict(X_copy_a_imputer.drop('on',axis=1))
+        self.X['on']=X_copy['on']
+        print("Les valeurs de 'on' ont été imputées avec succès.")
+        return self.X
+
+# test du code
+
+    
+
+
+
