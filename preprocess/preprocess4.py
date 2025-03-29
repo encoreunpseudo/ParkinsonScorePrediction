@@ -10,9 +10,9 @@ fichier pour centraliser toutes les transformations de données
 '''
 class PreprocessData:
     def __init__(self,path_X,path_y):
-        self.X=pd.read_csv(path_X)
+        self.X=path_X
 
-        self.y = pd.read_csv(path_y)
+        self.y = path_y
   
 
         self.enlever_index()
@@ -20,6 +20,8 @@ class PreprocessData:
         #self.virer_patient()
         self.encoder_cohort()
         self.imputer_age_at_diagnosis()
+        #self.rajout_feature_temps()
+        self.encoder_patient()
         
         
     
@@ -86,7 +88,32 @@ class PreprocessData:
         '''
         Pour capturer la relation temporelle
         '''
-        pass
+        
+        # rajouter le numéro de la visite
+        self.X['num_visite'] = self.X.groupby('patient_id').cumcount() + 1
+
+        # rajouter le nombre de visite total
+        self.X['nb_visites'] = self.X.groupby('patient_id')['num_visite'].transform('max')
+
+        # rajouter la progression du score on et off depuis la dernière visite
+        self.X['diff_on'] = self.X.groupby('patient_id')['on'].diff()
+        self.X['diff_off'] = self.X.groupby('patient_id')['off'].diff()
+
+        # rajouter la progression du score on et off depuis la première visite
+        self.X['diff_on_first'] = self.X.groupby('patient_id')['on'].transform('first')
+        self.X['diff_off_first'] = self.X.groupby('patient_id')['off'].transform('first')
+
+        # rajouter la moyenne du score on et off sur toutes les visites
+        self.X['mean_on'] = self.X.groupby('patient_id')['on'].transform('mean')
+        self.X['mean_off'] = self.X.groupby('patient_id')['off'].transform('mean')
+
+        # rajouter l'écart type du score on et off sur toutes les visites
+        self.X['std_on'] = self.X.groupby('patient_id')['on'].transform('std')
+        self.X['std_off'] = self.X.groupby('patient_id')['off'].transform('std')
+
+        # rajouter le temps depuis la dernière visite
+        self.X['time_since_last_visit'] = self.X.groupby('patient_id')['age'].diff()
+
     def imputer_age_at_diagnosis(self):
         """
         Impute les valeurs manquantes de age_at_diagnosis en utilisant une régression linéaire.
