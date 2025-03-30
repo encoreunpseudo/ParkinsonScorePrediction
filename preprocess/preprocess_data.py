@@ -42,7 +42,6 @@ class PreprocessData:
 
         X_copy = X_copy.drop(['off','patient_id','time_since_intake_on','time_since_intake_off'],axis=1)
 
-        # ✅ Ajoute la même feature que pendant le fit
         X_copy['is_missing_on'] = X_copy['on'].isna().astype(int)
 
         print("Imputations des valeurs de 'on' manquantes sur les données de test...")
@@ -177,7 +176,7 @@ class PreprocessData:
         X['diff_off_max'] = X['off'] - X['max_off']
 
         # capturer variabilité autour de la moyenne de off
-        
+
         X['diff_on_mean'] = X['on'] - X['mean_on']
         X['diff_on_max'] = X['on'] - X['mean_on']
 
